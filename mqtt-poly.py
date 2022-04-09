@@ -102,7 +102,12 @@ class Controller(polyinterface.Controller):
             else:
                 name = dev["id"]
             address = dev["id"].lower().replace("_", "")[:14]
-            if dev["type"] == "switch":
+            if dev["type"] == "shellyflood":
+                if not address in self.nodes:
+                    LOGGER.info(f"Adding {dev['type']} {name}")
+                    self.addNode(ShellyFlood(self, self.address, address, name, dev))
+                    self.status_topics.append(dev["status_topic"])
+            elif dev["type"] == "switch":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQSwitch(self, self.address, address, name, dev))
@@ -699,6 +704,53 @@ class MQhcsr(polyinterface.Node):
     id = "MQHCSR"
 
     commands = {"QUERY": query}
+
+class ShellyFlood(polyinterface.Node):
+    def __init__(self, controller, primary, address, name, device):
+        super().__init__(controller, primary, address, name)
+        self.on = False
+        self.device = device
+
+    def start(self):
+        pass
+
+    def updateInfo(self, payload):
+        try:
+            data = json.loads(payload)
+        except Exception as ex:
+            LOGGER.error(f"Failed to parse Shelly MQTT Payload as JSON: {ex} {payload}")
+            return False
+        if self.device["id"] in data:
+            LOGGER.warn(f"Located shelly flood in question: {data}")
+        else:
+            LOGGER.warn(f"Did not locate shelly flood in question: {data}")
+
+
+    def query(self, command=None):
+        self.reportDrivers()
+
+    # UOMs of interest:
+    # 17 = degrees F (temp)
+    # 2 = boolean (flood)
+    # 51 = percent (battery)
+    # 56 = raw value from device (error)
+
+    # Driver controls of interest:
+    # BATLVL = battery level
+    # MOIST = moisture
+    # CLITEMP = current temperature
+    # GPV = general purpose value
+
+    drivers = [
+        {"driver": "CLITEMP", "value": 0, "uom": 17},
+        {"driver": "MOIST", "value": 0, "uom": 2},
+        {"driver": "BATLVL", "value": 0, "uom": 51},
+        {"driver": "GPV", "value": 0, "uom": 56},
+    ]
+
+    id = "ShellyFlood"
+
+    commands = {"QUERY", query}
 
 
 # General purpose Analog input using ADC.
