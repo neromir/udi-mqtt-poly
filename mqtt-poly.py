@@ -6,6 +6,7 @@ import logging
 import paho.mqtt.client as mqtt
 import json
 import yaml
+from typing import Dict, List
 
 LOGGER = polyinterface.LOGGER
 
@@ -23,6 +24,8 @@ class Controller(polyinterface.Controller):
         self.devlist = None
         # example: [ {'id': 'sonoff1', 'type': 'switch', 'status_topic': 'stat/sonoff1/power', 'cmd_topic': 'cmnd/sonoff1/power'} ]
         self.status_topics = []
+        # Maps to device IDs
+        self.status_topics_to_devices: Dict[str, str] = {}
         self.mqttc = None
 
     def start(self):
@@ -101,72 +104,73 @@ class Controller(polyinterface.Controller):
                 name = dev["name"]
             else:
                 name = dev["id"]
-            address = dev["id"].lower().replace("_", "")[:14]
+            address = Controller._get_device_address(dev)
             if dev["type"] == "shellyflood":
                 if not address in self.nodes:
                     LOGGER.info(f"Adding {dev['type']} {name}")
                     self.addNode(ShellyFlood(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    status_topics = dev["status_topic"]
+                    self._add_status_topics(dev, status_topics)
             elif dev["type"] == "switch":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQSwitch(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "sensor":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQSensor(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "flag":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQFlag(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "TempHumid":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQdht(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "Temp":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQds(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "TempHumidPress":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQbme(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "distance":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQhcsr(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "analog":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQAnalog(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "s31":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQs31(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "raw":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQraw(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "RGBW":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQRGBWstrip(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             elif dev["type"] == "ifan":
                 if not address is self.nodes:
                     LOGGER.info("Adding {} {}".format(dev["type"], name))
                     self.addNode(MQFan(self, self.address, address, name, dev))
-                    self.status_topics.append(dev["status_topic"])
+                    self._add_status_topics(dev, [dev["status_topic"]])
             else:
                 LOGGER.error("Device type {} is not yet supported".format(dev["type"]))
         LOGGER.info("Done adding nodes, connecting to MQTT broker...")
@@ -179,6 +183,11 @@ class Controller(polyinterface.Controller):
             return False
 
         return True
+
+    def _add_status_topics(self, dev, status_topics: List[str]):
+        for status_topic in status_topics:
+            self.status_topics.append(status_topic)
+            self.status_topics_to_devices[status_topic] = Controller._get_device_address(dev)
 
     def _on_connect(self, mqttc, userdata, flags, rc):
         if rc == 0:
@@ -221,15 +230,18 @@ class Controller(polyinterface.Controller):
         payload = message.payload.decode("utf-8")
         LOGGER.debug("Received {} from {}".format(payload, topic))
         try:
-            self.nodes[self._dev_by_topic(topic)].updateInfo(payload)
+            dev_id = self._dev_by_topic(topic)
+            LOGGER.debug(f"Handling message on device {dev_id}")
+            self.nodes[dev_id].updateInfo(payload, topic)
         except Exception as ex:
             LOGGER.error("Failed to process message {}".format(ex))
 
     def _dev_by_topic(self, topic):
-        for dev in self.devlist:
-            if dev["status_topic"] == topic:
-                return dev["id"].lower()[:14]
-        return None
+        return self.status_topics_to_devices.get(topic, None)
+
+    @staticmethod
+    def _get_device_address(dev) -> str:
+        return dev["id"].lower().replace("_", "").replace("-", "")[:14]
 
     def mqtt_pub(self, topic, message):
         self.mqttc.publish(topic, message, retain=False)
@@ -263,7 +275,7 @@ class MQSwitch(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         if payload == "ON":
             if not self.on:
                 self.reportCmd("DON")
@@ -305,7 +317,7 @@ class MQFan(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             json_payload = json.loads(payload)
             fan_speed = int(json_payload['FanSpeed'])
@@ -365,7 +377,7 @@ class MQSensor(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             data = json.loads(payload)
         except Exception as ex:
@@ -499,7 +511,7 @@ class MQFlag(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         if payload == "OK":
             self.setDriver("ST", 0)
         elif payload == "NOK":
@@ -556,7 +568,7 @@ class MQdht(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             data = json.loads(payload)
         except Exception as ex:
@@ -595,7 +607,7 @@ class MQds(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             data = json.loads(payload)
         except Exception as ex:
@@ -632,7 +644,7 @@ class MQbme(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             data = json.loads(payload)
         except Exception as ex:
@@ -678,7 +690,7 @@ class MQhcsr(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             data = json.loads(payload)
         except Exception as ex:
@@ -714,17 +726,20 @@ class ShellyFlood(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
-        try:
-            data = json.loads(payload)
-        except Exception as ex:
-            LOGGER.error(f"Failed to parse Shelly MQTT Payload as JSON: {ex} {payload}")
-            return False
-        if self.device["id"] in data:
-            LOGGER.warn(f"Located shelly flood in question: {data}")
+    def updateInfo(self, payload, topic: str):
+        LOGGER.debug(f"Attempting to handle message for Shelly on topic {topic} with payload {payload}")
+        topic_suffix = topic.split('/')[-1]
+        if topic_suffix == "temperature":
+            self.setDriver("CLITEMP", payload)
+        elif topic_suffix == "flood":
+            value = payload == "true"
+            self.setDriver("MOIST", value)
+        elif topic_suffix == "battery":
+            self.setDriver("BATLVL", payload)
+        elif topic_suffix == "error":
+            self.setDriver("GPV", payload)
         else:
-            LOGGER.warn(f"Did not locate shelly flood in question: {data}")
-
+            LOGGER.warn(f"Unable to handle data for topic {topic}")
 
     def query(self, command=None):
         self.reportDrivers()
@@ -742,15 +757,17 @@ class ShellyFlood(polyinterface.Node):
     # GPV = general purpose value
 
     drivers = [
-        {"driver": "CLITEMP", "value": 0, "uom": 17},
-        {"driver": "MOIST", "value": 0, "uom": 2},
-        {"driver": "BATLVL", "value": 0, "uom": 51},
-        {"driver": "GPV", "value": 0, "uom": 56},
+        {"driver": "CLITEMP", "value": 0, "uom": 17}, # Temperature sensor
+        {"driver": "MOIST", "value": 0, "uom": 2}, # flood or not
+        {"driver": "BATLVL", "value": 0, "uom": 51}, # battery level indicator
+        {"driver": "GPV", "value": 0, "uom": 56}, # error code
     ]
 
     id = "ShellyFlood"
 
     commands = {"QUERY", query}
+
+    hint = [0x07, 0, 0, 0]
 
 
 # General purpose Analog input using ADC.
@@ -764,7 +781,7 @@ class MQAnalog(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             data = json.loads(payload)
         except Exception as ex:
@@ -803,7 +820,7 @@ class MQs31(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             data = json.loads(payload)
         except Exception as ex:
@@ -847,7 +864,7 @@ class MQraw(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             self.setDriver("ST", 1)
             self.setDriver("GV1", int(payload))
@@ -878,7 +895,7 @@ class MQRGBWstrip(polyinterface.Node):
     def start(self):
         pass
 
-    def updateInfo(self, payload):
+    def updateInfo(self, payload, topic: str):
         try:
             data = json.loads(payload)
         except Exception as ex:
