@@ -228,4 +228,19 @@
             </accepts>
         </cmds>
     </nodeDef>
+    <nodeDef id="ShellyFlood" nls="FLOOD">
+        <editors />
+        <sts>
+            <st id="CLITEMP" editor="TEMPF" />
+            <st id="MOIST" editor="BOOL" />
+            <st id="BATLVL" editor="BATTERY" />
+            <st id="GPV" editor="VALUE" />
+        </sts>
+        <cmds>
+            <sends />
+            <accepts>
+                <cmd id="QUERY" />
+            </accepts>
+        </cmds>
+    </nodeDef>
 </nodeDefs>
