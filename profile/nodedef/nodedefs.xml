@@ -228,11 +228,12 @@
             </accepts>
         </cmds>
     </nodeDef>
-    <nodeDef id="ShellyFlood" nls="FLOOD">
+    <nodeDef id="SHFLOOD" nls="FLOOD">
         <editors />
         <sts>
+            <st id="ST" editor="BOOL" />
             <st id="CLITEMP" editor="TEMPF" />
-            <st id="MOIST" editor="BOOL" />
+            <st id="GV0" editor="BOOL" />
             <st id="BATLVL" editor="BATTERY" />
             <st id="GPV" editor="VALUE" />
         </sts>

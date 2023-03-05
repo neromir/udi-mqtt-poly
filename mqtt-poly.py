@@ -6,6 +6,7 @@ import logging
 import paho.mqtt.client as mqtt
 import json
 import yaml
+import requests
 from typing import Dict, List
 
 LOGGER = polyinterface.LOGGER
@@ -21,6 +22,8 @@ class Controller(polyinterface.Controller):
         self.mqtt_port = 1883
         self.mqtt_user = None
         self.mqtt_password = None
+        self.isy_user = None
+        self.isy_password = None
         self.devlist = None
         # example: [ {'id': 'sonoff1', 'type': 'switch', 'status_topic': 'stat/sonoff1/power', 'cmd_topic': 'cmnd/sonoff1/power'} ]
         self.status_topics = []
@@ -41,6 +44,18 @@ class Controller(polyinterface.Controller):
         if "mqtt_password" not in self.polyConfig["customParams"]:
             LOGGER.error("mqtt_password must be configured")
             return False
+
+        if "isy_user" not in self.polyConfig["customParams"]:
+            LOGGER.error("isy_user must be configured for shelly devices")
+            return False
+        else:
+            self.isy_user = self.polyConfig["customParams"]["isy_user"]
+
+        if "isy_password" not in self.polyConfig["customParams"]:
+            LOGGER.error("isy_password must be configured for shelly devices")
+            return False
+        else:
+            self.isy_password = self.polyConfig["customParams"]["isy_password"]
 
         self.mqtt_user = self.polyConfig["customParams"]["mqtt_user"]
         self.mqtt_password = self.polyConfig["customParams"]["mqtt_password"]
@@ -108,7 +123,7 @@ class Controller(polyinterface.Controller):
             if dev["type"] == "shellyflood":
                 if not address in self.nodes:
                     LOGGER.info(f"Adding {dev['type']} {name}")
-                    self.addNode(ShellyFlood(self, self.address, address, name, dev))
+                    self.addNode(ShellyFlood(self, address, address, name, dev, self.isy_user, self.isy_password))
                     status_topics = dev["status_topic"]
                     self._add_status_topics(dev, status_topics)
             elif dev["type"] == "switch":
@@ -241,7 +256,7 @@ class Controller(polyinterface.Controller):
 
     @staticmethod
     def _get_device_address(dev) -> str:
-        return dev["id"].lower().replace("_", "").replace("-", "")[:14]
+        return dev["id"].lower().replace("_", "").replace("-", "_")[:14]
 
     def mqtt_pub(self, topic, message):
         self.mqttc.publish(topic, message, retain=False)
@@ -718,23 +733,33 @@ class MQhcsr(polyinterface.Node):
     commands = {"QUERY": query}
 
 class ShellyFlood(polyinterface.Node):
-    def __init__(self, controller, primary, address, name, device):
+    def __init__(self, controller, primary, address, name, device, isy_user, isy_password):
         super().__init__(controller, primary, address, name)
         self.on = False
         self.device = device
+        self.isy_user = isy_user
+        self.isy_password = isy_password
 
     def start(self):
-        pass
+        return True
 
     def updateInfo(self, payload, topic: str):
         LOGGER.debug(f"Attempting to handle message for Shelly on topic {topic} with payload {payload}")
         topic_suffix = topic.split('/')[-1]
+        self.setDriver("ST", 1)
         if topic_suffix == "temperature":
             self.setDriver("CLITEMP", payload)
         elif topic_suffix == "flood":
             value = payload == "true"
-            self.setDriver("MOIST", value)
+            value_int = 1 if payload == "true" else 0
+            # LOGGER.debug(f"Updating ISY variable ID {self.device['flood_var_id']} with flood value {value_int}")
+            # response = requests.get(f"http://{self.isy_user}:{self.isy_password}@192.168.1.3/rest/vars/set/2/{self.device['flood_var_id']}/{value_int}")
+            # LOGGER.debug(f"Response: {response.status_code}")
+            self.setDriver("GV0", value)
         elif topic_suffix == "battery":
+            # LOGGER.debug(f"Updating ISY variable ID {self.device['bat_var_id']} with flood value {payload}")
+            # response = requests.get(f"http://{self.isy_user}:{self.isy_password}@192.168.1.3/rest/vars/set/2/{self.device['bat_var_id']}/{payload}")
+            # LOGGER.debug(f"Response: {response.status_code}")
             self.setDriver("BATLVL", payload)
         elif topic_suffix == "error":
             self.setDriver("GPV", payload)
@@ -755,19 +780,21 @@ class ShellyFlood(polyinterface.Node):
     # MOIST = moisture
     # CLITEMP = current temperature
     # GPV = general purpose value
+    # GV0 = custom control 0
 
     drivers = [
+        {"driver": "ST", "value": 0, "uom": 2},
         {"driver": "CLITEMP", "value": 0, "uom": 17}, # Temperature sensor
-        {"driver": "MOIST", "value": 0, "uom": 2}, # flood or not
+        {"driver": "GV0", "value": 0, "uom": 2}, # flood or not
         {"driver": "BATLVL", "value": 0, "uom": 51}, # battery level indicator
         {"driver": "GPV", "value": 0, "uom": 56}, # error code
     ]
 
-    id = "ShellyFlood"
+    id = "SHFLOOD"
 
     commands = {"QUERY", query}
 
-    hint = [0x07, 0, 0, 0]
+    # hint = [0x07, 0, 0, 0]
 
 
 # General purpose Analog input using ADC.
